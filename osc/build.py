@@ -327,6 +327,7 @@ def get_preinstall_image(apiurl, arch, cache_dir, img_info, offline=False):
     """
     imagefile = ''
     imagesource = ''
+    imageinfo = ''
     img_bins = []
     for bin in img_info.findall('binary'):
         img_bins.append(bin.text)
@@ -348,7 +349,7 @@ def get_preinstall_image(apiurl, arch, cache_dir, img_info, offline=False):
 
     if not os.path.exists(ifile_path):
         if offline:
-            return '', '', []
+            return '', '', '', []
         url = "%s/build/%s/%s/%s/%s/%s" % (apiurl, img_project, img_repository, img_arch, img_pkg, img_file)
         print("downloading preinstall image %s" % imagesource)
         if not os.path.exists(cache_path):
@@ -366,10 +367,27 @@ def get_preinstall_image(apiurl, arch, cache_dir, img_info, offline=False):
             gr.urlgrab(url, filename=ifile_path_part, text='fetching image')
         except HTTPError as e:
             print("Failed to download! ecode:%i reason:%s" % (e.code, e.reason))
-            return ('', '', [])
+            return ('', '', '', [])
         # download ok, rename partial file to final file name
         os.rename(ifile_path_part, ifile_path)
-    return (imagefile, imagesource, img_bins)
+
+        # Also download the corresponding .info file
+        info_file = 'preinstallimage.info'
+        info_file_path = '%s/%s' % (cache_path, info_file)
+        info_file_path_part = '%s.part' % info_file_path
+
+        if not os.path.exists(info_file_path):
+            info_url = "%s/build/%s/%s/%s/%s/%s" % (apiurl, img_project, img_repository, img_arch, img_pkg, info_file)
+            print("downloading preinstall image info file")
+            try:
+                gr.urlgrab(info_url, filename=info_file_path_part, text='fetching info')
+                # download ok, rename partial file to final file name
+                os.rename(info_file_path_part, info_file_path)
+            except HTTPError as e:
+                print("Failed to download info file! ecode:%i reason:%s" % (e.code, e.reason))
+
+    imageinfo = '%s/%s' % (cache_path, 'preinstallimage.info')
+    return (imagefile, imagesource, imageinfo, img_bins)
 
 
 def get_built_files(pacdir, buildtype):
@@ -623,7 +641,7 @@ def calculate_prj_pac(store, opts, descr):
 
 
 def calculate_build_root_user(vm_type):
-    if vm_type in ("kvm", "podman", "qemu"):
+    if vm_type in ("kvm", "qemu"):
         return getpass.getuser()
     return None
 
@@ -1187,6 +1205,7 @@ def main(apiurl, store, opts, argv):
 
     imagefile = ''
     imagesource = ''
+    imageinfo = ''
     imagebins = []
     if build_as_user(vm_type):
         # preinstallimage extraction will fail because unprivileged user cannot chroot or extract devices from the tarball
@@ -1200,7 +1219,7 @@ def main(apiurl, store, opts, argv):
         not opts.noinit and
         (opts.clean or (not os.path.exists(build_root + "/installed-pkg") and
                         not os.path.exists(build_root + "/.build/init_buildsystem.data")))):
-        (imagefile, imagesource, imagebins) = get_preinstall_image(apiurl, arch, cache_dir, bi.preinstallimage,
+        (imagefile, imagesource, imageinfo, imagebins) = get_preinstall_image(apiurl, arch, cache_dir, bi.preinstallimage,
                                                                    opts.offline)
         if imagefile:
             # remove binaries from build deps which are included in preinstall image
@@ -1495,6 +1514,8 @@ def main(apiurl, store, opts, argv):
         rpmlist.append('preinstallimage: %s\n' % imagefile)
     if imagesource:
         rpmlist.append('preinstallimagesource: %s\n' % imagesource)
+    if imageinfo:
+        rpmlist.append('preinstallimageinfo: %s\n' % imageinfo)
 
     rpmlist.append('preinstall: ' + ' '.join(bi.preinstall_list) + '\n')
     rpmlist.append('vminstall: ' + ' '.join(bi.vminstall_list) + '\n')
