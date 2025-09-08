@@ -27,6 +27,16 @@ DECLINE_REVIEW_TEMPLATE = """
 """
 
 
+CLOSE_TEMPLATE = """
+
+#
+# Lines starting with '#' will be ignored.
+#
+# Closing pull request {owner}/{repo}#{number}
+#
+"""
+
+
 class PullRequestReviewInteractiveCommand(osc.commandline_git.GitObsCommand):
     """
     Interactive review of pull requests
@@ -101,12 +111,14 @@ class PullRequestReviewInteractiveCommand(osc.commandline_git.GitObsCommand):
                         "a": "approve",
                         "A": "approve and schedule for merging",
                         "d": "decline",
+                        "C": "close",
                         "m": "comment",
                         "v": "view again",
                         "s": "skip",
                         "x": "exit",
                     },
                     default_answer="s",
+                    vertical=True,
                 )
                 if reply == "a":
                     self.approve(owner, repo, number, commit=pr_obj.head_commit)
@@ -117,6 +129,9 @@ class PullRequestReviewInteractiveCommand(osc.commandline_git.GitObsCommand):
                     break
                 elif reply == "d":
                     self.decline(owner, repo, number)
+                    break
+                elif reply == "C":
+                    self.close(owner, repo, number)
                     break
                 elif reply == "m":
                     self.comment(owner, repo, number)
@@ -155,6 +170,20 @@ class PullRequestReviewInteractiveCommand(osc.commandline_git.GitObsCommand):
         message = message.strip()
 
         gitea_api.PullRequest.decline_review(self.gitea_conn, owner, repo, number, msg=message, reviewer=reviewer)
+
+    def close(self, owner: str, repo: str, number: int):
+        from osc import gitea_api
+
+        message = gitea_api.edit_message(template=CLOSE_TEMPLATE.format(**locals()))
+
+        # remove comments
+        message = "\n".join([i for i in message.splitlines() if not i.startswith("#")])
+
+        # strip leading and trailing spaces
+        message = message.strip()
+
+        gitea_api.PullRequest.add_comment(self.gitea_conn, owner, repo, number, msg=message)
+        gitea_api.PullRequest.close(self.gitea_conn, owner, repo, number)
 
     def comment(self, owner: str, repo: str, number: int):
         from osc import gitea_api
@@ -279,11 +308,12 @@ class PullRequestReviewInteractiveCommand(osc.commandline_git.GitObsCommand):
 
         # the repo might be outdated, make sure the commits are available
         base_git.fetch()
+        base_git.switch(pr_obj.base_branch)
+        base_git.reset(pr_obj.base_commit, hard=True)
 
         head_path = self.get_git_repo_path(owner, repo, number, subdir="head")
         if os.path.exists(head_path):
             # update the 'base' and 'head' worktrees to the latest revisions from the pull request
-            base_git.reset(pr_obj.head_commit, hard=True)
             pr_branch = base_git.fetch_pull_request(number, commit=pr_obj.head_commit, force=True)
         else:
             # IMPORTANT: git lfs is extremly difficult to use to query files from random branches and commits.

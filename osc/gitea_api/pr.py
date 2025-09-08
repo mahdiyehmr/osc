@@ -4,17 +4,14 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
+from .common import GiteaModel
 from .connection import Connection
 from .connection import GiteaHTTPResponse
 from .user import User
 
 
 @functools.total_ordering
-class PullRequest:
-    def __init__(self, data, *, response: Optional[GiteaHTTPResponse] = None):
-        self._data = data
-        self._response = response
-
+class PullRequest(GiteaModel):
     def __eq__(self, other):
         (self.base_owner, self.base_repo, self.number) == (other.base_owner, other.base_repo, other.number)
 
@@ -24,9 +21,9 @@ class PullRequest:
     @classmethod
     def split_id(cls, pr_id: str) -> Tuple[str, str, int]:
         """
-        Split <owner>/<repo>#<number> into individual components and return them in a tuple.
+        Split <owner>/<repo>#<number> or <owner>/<repo>!<number> into individual components and return them in a tuple.
         """
-        match = re.match(r"^([^/]+)/([^/]+)#([0-9]+)$", pr_id)
+        match = re.match(r"^([^/]+)/([^/]+)[#!]([0-9]+)$", pr_id)
         if not match:
             raise ValueError(f"Invalid pull request id: {pr_id}")
         return match.group(1), match.group(2), int(match.group(3))
@@ -558,3 +555,41 @@ class PullRequest:
             # the error message is the same and it's not possible to distinguish between the two cases.
             if e.status != 404:
                 raise
+
+    @classmethod
+    def close(
+        cls,
+        conn: Connection,
+        owner: str,
+        repo: str,
+        number: int,
+    ) -> "PullRequest":
+        """
+        Close a pull request.
+        """
+        url = conn.makeurl("repos", owner, repo, "pulls", str(number))
+        json_data = {
+            "state": "closed",
+        }
+        response = conn.request("PATCH", url, json_data=json_data, context={"owner": owner, "repo": repo})
+        obj = cls(response.json(), response=response, conn=conn)
+        return obj
+
+    @classmethod
+    def reopen(
+        cls,
+        conn: Connection,
+        owner: str,
+        repo: str,
+        number: int,
+    ) -> "PullRequest":
+        """
+        Reopen a pull request.
+        """
+        url = conn.makeurl("repos", owner, repo, "pulls", str(number))
+        json_data = {
+            "state": "open",
+        }
+        response = conn.request("PATCH", url, json_data=json_data, context={"owner": owner, "repo": repo})
+        obj = cls(response.json(), response=response, conn=conn)
+        return obj
